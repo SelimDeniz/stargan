@@ -13,12 +13,13 @@ import datetime
 class Solver(object):
     """Solver for training and testing StarGAN."""
 
-    def __init__(self, celeba_loader, rafd_loader, config):
+    def __init__(self, celeba_loader, rafd_loader, custom_loader, config):
         """Initialize configurations."""
 
         # Data loader.
         self.celeba_loader = celeba_loader
         self.rafd_loader = rafd_loader
+        self.custom_loader = custom_loader
 
         # Model configurations.
         self.c_dim = config.c_dim
@@ -71,7 +72,7 @@ class Solver(object):
 
     def build_model(self):
         """Create a generator and a discriminator."""
-        if self.dataset in ['CelebA', 'RaFD']:
+        if self.dataset in ['CelebA', 'RaFD', 'custom']:
             self.G = Generator(self.g_conv_dim, self.c_dim, self.g_repeat_num)
             self.D = Discriminator(self.image_size, self.d_conv_dim, self.c_dim, self.d_repeat_num) 
         elif self.dataset in ['Both']:
@@ -166,7 +167,7 @@ class Solver(object):
                             c_trg[:, j] = 0
                 else:
                     c_trg[:, i] = (c_trg[:, i] == 0)  # Reverse attribute value.
-            elif dataset == 'RaFD':
+            elif dataset in ['custom', 'RaFD']:
                 c_trg = self.label2onehot(torch.ones(c_org.size(0))*i, c_dim)
 
             c_trg_list.append(c_trg.to(self.device))
@@ -176,7 +177,7 @@ class Solver(object):
         """Compute binary or softmax cross entropy loss."""
         if dataset == 'CelebA':
             return F.binary_cross_entropy_with_logits(logit, target, size_average=False) / logit.size(0)
-        elif dataset == 'RaFD':
+        elif dataset in ['custom', 'RaFD']:
             return F.cross_entropy(logit, target)
 
     def train(self):
@@ -186,10 +187,12 @@ class Solver(object):
             data_loader = self.celeba_loader
         elif self.dataset == 'RaFD':
             data_loader = self.rafd_loader
+        elif self.dataset == 'custom':
+            data_loader = self.custom_loader
 
         # Fetch fixed inputs for debugging.
         data_iter = iter(data_loader)
-        x_fixed, c_org = next(data_iter)
+        x_fixed, c_org = next(data_iter)    #x_fixed:images, c_org:labels
         x_fixed = x_fixed.to(self.device)
         c_fixed_list = self.create_labels(c_org, self.c_dim, self.dataset, self.selected_attrs)
 
@@ -226,7 +229,7 @@ class Solver(object):
             if self.dataset == 'CelebA':
                 c_org = label_org.clone()
                 c_trg = label_trg.clone()
-            elif self.dataset == 'RaFD':
+            elif self.dataset in ['custom', 'RaFD']:
                 c_org = self.label2onehot(label_org, self.c_dim)
                 c_trg = self.label2onehot(label_trg, self.c_dim)
 
@@ -315,13 +318,24 @@ class Solver(object):
             # Translate fixed images for debugging.
             if (i+1) % self.sample_step == 0:
                 with torch.no_grad():
-                    x_fake_list = [x_fixed]
+                    x_fake_list = [x_fixed]                             # original logmels
                     for c_fixed in c_fixed_list:
-                        x_fake_list.append(self.G(x_fixed, c_fixed))
-                    x_concat = torch.cat(x_fake_list, dim=3)
-                    sample_path = os.path.join(self.sample_dir, '{}-images.jpg'.format(i+1))
+                        x_fake_list.append(self.G(x_fixed, c_fixed))    # get model prediction from original logmel for each emotion class
+                    x_concat = torch.cat(x_fake_list, dim=3)            # x-axis concatenation, 128x1152 image for each batch (row). Each 128 sample on row corresponds to an emotion class
+                    x_concat1 = self.denorm(x_concat.data.cpu())        # denormalization (shape remains unchanged)
+                    '''sample_path = os.path.join(self.sample_dir, '{}-images.jpg'.format(i+1))
                     save_image(self.denorm(x_concat.data.cpu()), sample_path, nrow=1, padding=0)
-                    print('Saved real and fake images into {}...'.format(sample_path))
+                    print('Saved real and fake images into {}...'.format(sample_path))'''
+                    # x_fake_list shape: [9, 16, 3, 128, 128] --> [(original label + target labels), (batches), (rgb channels), (height), (width)]
+                    for idxClass, x_fake_batched in enumerate(x_fake_list):     # iterate on domain labels (1 original + 8 target)
+                        for idxBatch, x_fake in enumerate(x_fake_batched):      # iterate on batches (16)
+                            if idxClass == 0:                                   # first label is original
+                                # <x-th batch>-batch-<y-th image of batch>_org-<original emotion label>.jpg
+                                sample_path = os.path.join(self.sample_dir, '{}-batch-{}_org-{}.jpg'.format(i,idxBatch,self.selected_attrs[torch.argmax(c_org[idxBatch])]))
+                            else:                                               # next labels are predicted target labels
+                                # <x-th batch>-batch-<y-th image of batch>_<predicted target label>.jpg
+                                sample_path = os.path.join(self.sample_dir, '{}-batch-{}_{}.jpg'.format(i,idxBatch,self.selected_attrs[idxClass-1]))
+                            save_image(self.denorm(x_fake.data.cpu()), sample_path, nrow=1, padding=0)
 
             # Save model checkpoints.
             if (i+1) % self.model_save_step == 0:
@@ -383,7 +397,7 @@ class Solver(object):
                     if dataset == 'CelebA':
                         celeba_iter = iter(self.celeba_loader)
                         x_real, label_org = next(celeba_iter)
-                    elif dataset == 'RaFD':
+                    elif dataset in ['custom', 'RaFD']:
                         rafd_iter = iter(self.rafd_loader)
                         x_real, label_org = next(rafd_iter)
 
@@ -398,7 +412,7 @@ class Solver(object):
                     mask = self.label2onehot(torch.zeros(x_real.size(0)), 2)
                     c_org = torch.cat([c_org, zero, mask], dim=1)
                     c_trg = torch.cat([c_trg, zero, mask], dim=1)
-                elif dataset == 'RaFD':
+                elif dataset in ['custom', 'RaFD']:
                     c_org = self.label2onehot(label_org, self.c2_dim)
                     c_trg = self.label2onehot(label_trg, self.c2_dim)
                     zero = torch.zeros(x_real.size(0), self.c_dim)
@@ -530,6 +544,8 @@ class Solver(object):
             data_loader = self.celeba_loader
         elif self.dataset == 'RaFD':
             data_loader = self.rafd_loader
+        elif self.dataset == 'custom':
+            data_loader = self.custom_loader
         
         with torch.no_grad():
             for i, (x_real, c_org) in enumerate(data_loader):
