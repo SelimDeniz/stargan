@@ -56,7 +56,7 @@ def main(config):
             solver.test_multi()
 
 
-class CustomArguments:
+'''class CustomArguments:
 
     def __init__(self):
 
@@ -109,14 +109,14 @@ class CustomArguments:
         self.result_dir = 'stargan_celeba_128/results'
         
         # Step size.
-        '''self.log_step = 10
-        self.sample_step = 1000
-        self.model_save_step = 10000
-        self.lr_update_step = 1000'''
+        #self.log_step = 10
+        #self.sample_step = 1000
+        #self.model_save_step = 10000
+        #self.lr_update_step = 1000
         self.log_step = 1
         self.sample_step = 1
         self.model_save_step = 1
-        self.lr_update_step = 1
+        self.lr_update_step = 1'''
 
 
 
@@ -180,7 +180,7 @@ if __name__ == '__main__':
 
     config = parser.parse_args()
 
-    '''config = CustomArguments()
+    #config = CustomArguments()
 
     print(config)
-    main(config)'''
+    main(config)
