@@ -193,6 +193,12 @@ class Solver(object):
         # Fetch fixed inputs for debugging.
         data_iter = iter(data_loader)
         x_fixed, c_org = next(data_iter)    #x_fixed:images, c_org:labels
+        
+        # --------------------------------------------------------------------- SİL ---------------------------------------------------------------------
+        flag = False
+        if len(x_fixed) != 16 or len(c_org) != 16:
+            flag = True
+            print(x_fixed.shape, c_org.shape)
         x_fixed = x_fixed.to(self.device)
         c_fixed_list = self.create_labels(c_org, self.c_dim, self.dataset, self.selected_attrs)
 
@@ -250,6 +256,8 @@ class Solver(object):
 
             # Compute loss with fake images.
             x_fake = self.G(x_real, c_trg)
+            if flag:
+                print(x_fake.shape)
             out_src, out_cls = self.D(x_fake.detach())
             d_loss_fake = torch.mean(out_src)
 
@@ -331,11 +339,11 @@ class Solver(object):
                         for idxBatch, x_fake in enumerate(x_fake_batched):      # iterate on batches (16)
                             if idxClass == 0:                                   # first label is original
                                 # <x-th batch>-batch-<y-th image of batch>_org-<original emotion label>.jpg
-                                print(f'c_org:\n{c_org}')
+                                '''print(f'c_org:\n{c_org}')
                                 print(f'c_org shape: {c_org.shape}')
                                 print(f'idx batch: {idxBatch}')
                                 print(f'c_org[idxBatch]: {c_org[idxBatch]}')
-                                print(f'torch.argmax(c_org[idxBatch]): {torch.argmax(c_org[idxBatch])}')
+                                print(f'torch.argmax(c_org[idxBatch]): {torch.argmax(c_org[idxBatch])}')'''
                                 sample_path = os.path.join(self.sample_dir, '{}-batch-{}_org-{}.jpg'.format(i,idxBatch,self.selected_attrs[torch.argmax(c_org[idxBatch])]))
                             else:                                               # next labels are predicted target labels
                                 # <x-th batch>-batch-<y-th image of batch>_<predicted target label>.jpg
