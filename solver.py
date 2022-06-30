@@ -1,3 +1,4 @@
+from itertools import tee
 from model import Generator
 from model import Discriminator
 from torch.autograd import Variable
@@ -192,13 +193,8 @@ class Solver(object):
 
         # Fetch fixed inputs for debugging.
         data_iter = iter(data_loader)
-        x_fixed, c_org = next(data_iter)    #x_fixed:images, c_org:labels
-        
-        # --------------------------------------------------------------------- SİL ---------------------------------------------------------------------
-        flag = False
-        if len(x_fixed) != 16 or len(c_org) != 16:
-            flag = True
-            print(x_fixed.shape, c_org.shape)
+
+        filepath_fixed, x_fixed, c_org = next(data_iter)    #x_fixed:images, c_org:labels
         x_fixed = x_fixed.to(self.device)
         c_fixed_list = self.create_labels(c_org, self.c_dim, self.dataset, self.selected_attrs)
 
@@ -223,10 +219,10 @@ class Solver(object):
 
             # Fetch real images and labels.
             try:
-                x_real, label_org = next(data_iter)
+                filepath_real, x_real, label_org = next(data_iter)
             except:
                 data_iter = iter(data_loader)
-                x_real, label_org = next(data_iter)
+                filepath_real, x_real, label_org = next(data_iter)
 
             # Generate target domain labels randomly.
             rand_idx = torch.randperm(label_org.size(0))
@@ -256,8 +252,6 @@ class Solver(object):
 
             # Compute loss with fake images.
             x_fake = self.G(x_real, c_trg)
-            if flag:
-                print(x_fake.shape)
             out_src, out_cls = self.D(x_fake.detach())
             d_loss_fake = torch.mean(out_src)
 
@@ -329,25 +323,24 @@ class Solver(object):
                     x_fake_list = [x_fixed]                             # original logmels
                     for c_fixed in c_fixed_list:
                         x_fake_list.append(self.G(x_fixed, c_fixed))    # get model prediction from original logmel for each emotion class
-                    x_concat = torch.cat(x_fake_list, dim=3)            # x-axis concatenation, 128x1152 image for each batch (row). Each 128 sample on row corresponds to an emotion class
-                    x_concat1 = self.denorm(x_concat.data.cpu())        # denormalization (shape remains unchanged)
+                    #x_concat = torch.cat(x_fake_list, dim=3)            # x-axis concatenation, 128x1152 image for each batch (row). Each 128 sample on row corresponds to an emotion class
+                    #x_concat1 = self.denorm(x_concat.data.cpu())        # denormalization (shape remains unchanged)
                     '''sample_path = os.path.join(self.sample_dir, '{}-images.jpg'.format(i+1))
                     save_image(self.denorm(x_concat.data.cpu()), sample_path, nrow=1, padding=0)
                     print('Saved real and fake images into {}...'.format(sample_path))'''
                     # x_fake_list shape: [9, 16, 3, 128, 128] --> [(original label + target labels), (batches), (rgb channels), (height), (width)]
                     for idxClass, x_fake_batched in enumerate(x_fake_list):     # iterate on domain labels (1 original + 8 target)
+                        x_fake_batched = self.denorm(x_fake_batched.data.cpu())
                         for idxBatch, x_fake in enumerate(x_fake_batched):      # iterate on batches (16)
+                            filepath_cat = os.path.splitext(os.path.basename(filepath_fixed[idxBatch]))[0]
                             if idxClass == 0:                                   # first label is original
                                 # <x-th batch>-batch-<y-th image of batch>_org-<original emotion label>.jpg
-                                '''print(f'c_org:\n{c_org}')
-                                print(f'c_org shape: {c_org.shape}')
-                                print(f'idx batch: {idxBatch}')
-                                print(f'c_org[idxBatch]: {c_org[idxBatch]}')
-                                print(f'torch.argmax(c_org[idxBatch]): {torch.argmax(c_org[idxBatch])}')'''
-                                sample_path = os.path.join(self.sample_dir, '{}-batch-{}_org-{}.jpg'.format(i,idxBatch,self.selected_attrs[torch.argmax(c_org[idxBatch])]))
+                                #sample_path = os.path.join(self.sample_dir, '{}-batch-{}_org-{}.jpg'.format(i,idxBatch,self.selected_attrs[torch.argmax(c_org[idxBatch])]))
+                                sample_path = os.path.join(self.sample_dir, f'{i+1}_{filepath_cat}_org.png')
                             else:                                               # next labels are predicted target labels
                                 # <x-th batch>-batch-<y-th image of batch>_<predicted target label>.jpg
-                                sample_path = os.path.join(self.sample_dir, '{}-batch-{}_{}.jpg'.format(i,idxBatch,self.selected_attrs[idxClass-1]))
+                                #sample_path = os.path.join(self.sample_dir, '{}-batch-{}_{}.jpg'.format(i,idxBatch,self.selected_attrs[idxClass-1]))
+                                sample_path = os.path.join(self.sample_dir, f'{i+1}_{filepath_cat}_{self.selected_attrs[idxClass-1]}.png')
                             save_image(self.denorm(x_fake.data.cpu()), sample_path, nrow=1, padding=0)
 
             # Save model checkpoints.
@@ -366,7 +359,7 @@ class Solver(object):
                 print ('Decayed learning rates, g_lr: {}, d_lr: {}.'.format(g_lr, d_lr))
 
     def train_multi(self):
-        """Train StarGAN with multiple datasets."""        
+        """Train StarGAN with multiple datasets."""
         # Data iterators.
         celeba_iter = iter(self.celeba_loader)
         rafd_iter = iter(self.rafd_loader)
